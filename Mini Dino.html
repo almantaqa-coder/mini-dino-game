@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini Dino Game</title>
+<style>
+  body { margin:0; background:#fff; }
+  canvas { background:#fff; display:block; margin:auto; cursor:pointer; }
+</style>
+</head>
+<body>
+<canvas id="dino" width="400" height="150"></canvas>
+<script>
+const canvas = document.getElementById("dino");
+const ctx = canvas.getContext("2d");
+
+let gameRunning = false;
+let gameOver = false;
+let dino, gravity, obstacles, frame, score;
+
+function initGame() {
+  dino = { x: 20, y: 110, w: 20, h: 20, dy: 0, jump: false };
+  gravity = 0.6;
+  obstacles = [];
+  frame = 0;
+  score = 0;
+  gameOver = false;
+}
+
+document.addEventListener("keydown", e => {
+  if (gameRunning && !gameOver) {
+    if ((e.code === "Space" || e.code === "ArrowUp") && !dino.jump) {
+      dino.dy = -10;
+      dino.jump = true;
+    }
+  }
+});
+
+canvas.addEventListener("click", () => {
+  if (!gameRunning) {
+    initGame();
+    gameRunning = true;
+    loop();
+  } else if (gameOver) {
+    initGame();
+    loop();
+  }
+});
+
+function drawDino() {
+  ctx.fillStyle = "#555";
+  ctx.fillRect(dino.x, dino.y, dino.w, dino.h);
+}
+
+function drawObstacles() {
+  ctx.fillStyle = "#333";
+  obstacles.forEach(o => ctx.fillRect(o.x, o.y, o.w, o.h));
+}
+
+function updateObstacles() {
+  if (frame % 90 === 0) {
+    let height = 20 + Math.random() * 20;
+    obstacles.push({ x: canvas.width, y: canvas.height - height - 10, w: 10, h: height });
+  }
+  obstacles.forEach(o => o.x -= 3);
+  obstacles = obstacles.filter(o => o.x + o.w > 0);
+}
+
+function collision() {
+  return obstacles.some(o =>
+    dino.x < o.x + o.w &&
+    dino.x + dino.w > o.x &&
+    dino.y < o.y + o.h &&
+    dino.y + dino.h > o.y
+  );
+}
+
+function loop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Gravity
+  dino.y += dino.dy;
+  dino.dy += gravity;
+  if (dino.y >= 110) {
+    dino.y = 110;
+    dino.jump = false;
+  }
+
+  drawDino();
+  updateObstacles();
+  drawObstacles();
+
+  ctx.fillStyle = "#888";
+  ctx.font = "12px sans-serif";
+  ctx.fillText("Score: " + score, 300, 20);
+
+  if (collision()) {
+    ctx.fillStyle = "red";
+    ctx.font = "16px sans-serif";
+    ctx.fillText("Game Over - Click to Restart", 80, 75);
+    gameOver = true;
+    return;
+  }
+
+  score++;
+  frame++;
+  if (!gameOver) requestAnimationFrame(loop);
+}
+
+// First load screen
+ctx.fillStyle = "#444";
+ctx.font = "16px sans-serif";
+ctx.fillText("Click to Start", 150, 75);
+</script>
+</body>
+</html>
