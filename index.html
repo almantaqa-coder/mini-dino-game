@@ -3,257 +3,290 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Mini Dino (Easy Mode)</title>
+<title>Dino — Simple One-Color (Fixed)</title>
 <style>
-  html,body { margin:0; padding:0; background:#fff; }
-  canvas { display:block; margin:auto; background:#fff; image-rendering: pixelated; cursor:pointer; }
+  html,body{margin:0;padding:0;background:#fff}
+  canvas{display:block;margin:auto;background:#fff;image-rendering:pixelated;cursor:pointer}
 </style>
 </head>
 <body>
-<canvas id="game" width="400" height="150"></canvas>
+<canvas id="game" width="400" height="150" aria-label="Dino game canvas"></canvas>
 <script>
-const W = 400, H = 150;
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
+/* Dino one-file clone (simple 1-color)
+   - Slower speed, safe obstacle spacing
+   - Short/long jump (hold Space/↑ or hold touch)
+   - Fair collision box
+   - Persistent HI score (localStorage)
+   - Space/↑/Click/Tap start + restart
+*/
+const W=400,H=150, GY=130;                 // ground Y
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
 
-let state = 'idle'; // 'idle' | 'running' | 'dead'
-let t = 0, speed = 3.5, groundX = 0, score = 0, hiScore = 0;
-let obstacles = [], clouds = [];
-let dino, jumpHold = false, jumpTime = 0;
-
-function rnd(a,b){ return Math.random()*(b-a)+a; }
-function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
-
-// Colors
 const COL = {
-  ink: '#535353',
-  ground: '#8b8b8b',
-  sky: '#cfcfcf'
+  ink:'#444',     // main color (1-color look)
+  ground:'#888',  // ground line/dots
+  cloud:'#cfcfcf'
 };
 
-// Dino frames
-const DINO = { w: 44, h: 48, ox: 10, oy: 10, frames: [] };
+let state='idle';                  // 'idle' | 'running' | 'dead'
+let speed=3.4;                     // slower baseline
+let groundX=0;
+let score=0, hiScore = parseInt(localStorage.getItem('dino-hi')||'0',10) || 0;
+let obstacles=[], clouds=[];
+let lastTime=performance.now();
+let jumpHold=false, jumpFrames=0;
+
+const RAND = (a,b)=>Math.random()*(b-a)+a;
+const CLAMP=(x,a,b)=>Math.max(a,Math.min(b,x));
+
+// --------- Procedural sprites (one color) ----------
+function pRect(c,x,y,w,h){ c.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h)); }
+
+// Dino (taller body, slimmer legs; 2 run frames + jump pose)
+const DINO={ w:46,h:48, ox:12, oy:10, frames:[] };
 (function buildDino(){
-  const cw = 60, ch = 60;
+  const CW=64, CH=64;
   function frame(runPhase=0){
-    const off = document.createElement('canvas');
-    off.width = cw; off.height = ch;
-    const c = off.getContext('2d');
-    c.fillStyle = COL.ink;
-    // body
-    c.fillRect(18,18, 22,20);
-    c.fillRect(34,14, 10,10);
-    c.fillRect(40,10, 4,4);
-    c.fillRect(43,13, 2,2);
-    // legs
-    if(runPhase===0){
-      c.fillRect(22,38, 6,10);
-      c.fillRect(32,40, 6,8);
-    } else {
-      c.fillRect(22,40, 6,8);
-      c.fillRect(32,38, 6,10);
-    }
+    const off=document.createElement('canvas'); off.width=CW; off.height=CH;
+    const c=off.getContext('2d'); c.fillStyle=COL.ink;
+    // torso + head (chrome-ish proportions, not identical)
+    pRect(c,20,18, 20,22);              // torso
+    pRect(c,36,14, 10,10);              // head block
+    pRect(c,44,12, 4,4);                // snout tip
+    pRect(c,45,15, 2,2);                // eye
+    // neck/chest
+    pRect(c,18,22, 3,10);
+    // tail stub
+    pRect(c,15,26, 5,4); pRect(c,12,27, 3,3);
+    // legs (alternate)
+    if(runPhase===0){ pRect(c,24,40, 6,10); pRect(c,34,41, 6,9); }
+    else            { pRect(c,24,41, 6,9 ); pRect(c,34,40, 6,10); }
     return off;
   }
-  DINO.frames.push(frame(0), frame(1), frame(0));
+  DINO.frames=[frame(0),frame(1),frame(0)]; // 0/1 run, 2 = jump uses 0
 })();
 
-// Cactus
-const CACT = [];
-(function buildCactuses(){
-  function cactusSmall(){
-    const off = document.createElement('canvas');
-    off.width = 24; off.height = 40;
-    const c = off.getContext('2d'); c.fillStyle = COL.ink;
-    c.fillRect(10,10, 6,26);
-    c.fillRect(5,18, 5,6);
-    c.fillRect(16,22, 5,6);
+// Cacti (two sizes, still one color)
+const CACT=[];
+(function buildCactus(){
+  function small(){
+    const off=document.createElement('canvas'); off.width=24; off.height=40;
+    const c=off.getContext('2d'); c.fillStyle=COL.ink;
+    pRect(c,10,10, 6,26); pRect(c,5,18, 5,6); pRect(c,16,22, 5,6);
     return off;
   }
-  CACT.push(cactusSmall());
+  function large(){
+    const off=document.createElement('canvas'); off.width=34; off.height=50;
+    const c=off.getContext('2d'); c.fillStyle=COL.ink;
+    pRect(c,8,12, 7,36); pRect(c,18,10, 7,38);
+    pRect(c,3,20, 5,7);  pRect(c,25,24, 6,7);
+    return off;
+  }
+  CACT.push(small(), large());
 })();
 
 // Cloud
-const CLOUD = (() => {
-  const off = document.createElement('canvas');
-  off.width = 50; off.height = 20;
-  const c = off.getContext('2d'); c.fillStyle = COL.sky;
-  c.fillRect(6,8, 12,6);
-  c.fillRect(12,6, 20,8);
-  c.fillRect(26,8, 16,6);
+const CLOUD=(()=>{
+  const off=document.createElement('canvas'); off.width=56; off.height=22;
+  const c=off.getContext('2d'); c.fillStyle=COL.cloud;
+  pRect(c, 6,9, 14,7); pRect(c,14,6, 24,10); pRect(c,30,9, 20,7);
   return off;
 })();
 
+// ------------- Game objects --------------
+const dino = {
+  x:30, y:GY-DINO.h, vy:0, onGround:true, anim:0
+};
+
+// spawn controls (safe spacing)
+let spawnCooldown=0; // time (ms) until next allowed spawn
+
 function reset(){
-  state = 'idle';
-  speed = 3.5;
-  groundX = 0;
-  score = 0;
-  obstacles = [];
-  clouds = [];
-  dino = {
-    x: 30,
-    y: groundY() - DINO.h,
-    vy: 0,
-    onGround: true,
-    anim: 0
-  };
-  for(let i=0;i<3;i++){
-    clouds.push({ x: rnd(0,W), y: rnd(10,40), v: rnd(0.3,0.8) });
+  state='idle';
+  speed=3.4;
+  groundX=0;
+  score=0;
+  obstacles=[];
+  clouds=[];
+  dino.x=30; dino.y=GY-DINO.h; dino.vy=0; dino.onGround=true; dino.anim=0;
+  spawnCooldown=700; // first obstacle later (ms)
+  // clouds
+  for(let i=0;i<3;i++) clouds.push({x:RAND(0,W), y:RAND(10,45), v:RAND(0.25,0.7)});
+}
+
+function groundDots(){
+  for(let x=Math.floor(groundX)%40; x<W; x+=40){
+    ctx.fillStyle=COL.ground;
+    pRect(ctx, x+8, GY+3, 2,1);
+    pRect(ctx, x+16, GY+6, 1,1);
+    pRect(ctx, x+26, GY+4, 2,1);
   }
 }
-function groundY(){ return 130; }
 
-function spawnObstacle(){
-  const img = CACT[0];
-  let x = W + rnd(0, 80);
-  // Easier gap settings
-  const minGap = clamp(140 - speed*4, 100, 160);
-  if(obstacles.length){
-    x = Math.max(x, obstacles[obstacles.length-1].x + minGap + rnd(40, 80));
+// ---- Spawning with guaranteed safety ----
+function estimatedJumpDistance(){
+  // Approx horizontal clearance you can cover during a "good" long jump
+  // Tune for current physics: base impulse + hold extension
+  // Higher number = farther apart obstacles.
+  return 150; // empirically safe for -6 initial vy, 0.4 gravity, hold extend below
+}
+function minSafeGap(){
+  // Add a margin that scales a bit with speed so it never spawns unfairly close
+  return estimatedJumpDistance() + 40 + speed*10; // ~190–220px typical
+}
+function trySpawnObstacle(dt){
+  spawnCooldown -= dt;
+  if(spawnCooldown > 0) return;
+
+  // If there is no obstacle, or the last one has moved far enough left, spawn a new one
+  const last = obstacles[obstacles.length-1];
+  const gapNeeded = minSafeGap();
+  const canSpawn = !last || (W - last.x) > gapNeeded;
+
+  if(canSpawn){
+    const type = Math.random()<0.6 ? 0 : 1; // more small than large
+    const img = CACT[type];
+    const extra = RAND(50, 120); // extra breathing room beyond minimum
+    obstacles.push({
+      img, w:img.width, h:img.height,
+      x: W + extra, y: GY - img.height
+    });
+    // Cooldown before another spawn is even considered
+    spawnCooldown = 350 + RAND(0,150); // ms
   }
-  obstacles.push({ img, w: img.width, h: img.height, x, y: groundY() - img.height });
 }
 
-function spawnCloud(){
-  clouds.push({ x: W + rnd(0,50), y: rnd(10,45), v: rnd(0.3,0.8) });
-}
-
+// ------------- Physics & Update -------------
 function update(dt){
   if(state!=='running') return;
-  speed += 0.0005 * dt;
 
+  // speed ramp (gentle)
+  speed += 0.00035 * dt;
+
+  // ground scroll
   groundX -= speed;
   if(groundX < -40) groundX += 40;
 
-  for(const c of clouds){ c.x -= c.v; }
+  // clouds
+  for(const c of clouds) c.x -= c.v;
   clouds = clouds.filter(c => c.x > -60);
-  if(Math.random() < 0.008) spawnCloud();
+  if(Math.random() < 0.007) clouds.push({x:W+RAND(0,40), y:RAND(10,45), v:RAND(0.25,0.7)});
 
-  for(const o of obstacles){ o.x -= speed; }
-  obstacles = obstacles.filter(o => o.x + o.w > -4);
-  if(obstacles.length===0 || (W - (obstacles[obstacles.length-1]?.x||0)) > 140+rnd(40,80)){
-    spawnObstacle();
+  // obstacles
+  for(const o of obstacles) o.x -= speed;
+  obstacles = obstacles.filter(o => o.x + o.w > -6);
+  trySpawnObstacle(dt);
+
+  // jump — variable height (hold to extend)
+  if(jumpHold && !dino.onGround && jumpFrames < 12){
+    dino.vy -= 0.24; // small upward "thrust" while held
+    jumpFrames++;
   }
 
-  // Jump physics
-  if(jumpHold && !dino.onGround && jumpTime < 12){
-    dino.vy -= 0.25; // extend jump if holding
-    jumpTime++;
-  }
+  // gravity & ground
+  dino.vy += 0.40;
+  dino.y  += dino.vy;
+  const gy = GY - DINO.h;
+  if(dino.y >= gy){ dino.y = gy; dino.vy = 0; dino.onGround = true; }
 
-  dino.vy += 0.4; // gravity
-  dino.y += dino.vy;
-  const gy = groundY() - DINO.h;
-  if(dino.y >= gy){
-    dino.y = gy; dino.vy = 0; dino.onGround = true;
-  }
-
+  // run animation
   dino.anim += speed*0.12;
 
+  // score
   score += Math.floor(dt*0.05);
-  if(score>hiScore) hiScore = score;
+  if(score>hiScore){ hiScore=score; }
 
+  // collision (FAIR hitboxes)
+  // Dino hitbox: inset to avoid nose/tail pixel unfair hits
+  const a = { x:dino.x+8, y:dino.y+6, w:DINO.w-16, h:DINO.h-10 };
   for(const o of obstacles){
-    const a = {x:dino.x+6, y:dino.y+6, w:DINO.w-12, h:DINO.h-8};
-    const b = {x:o.x+2, y:o.y+2, w:o.w-4, h:o.h-4};
+    const b = { x:o.x+2, y:o.y+2, w:o.w-4, h:o.h-4 };
     if(a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y){
-      state = 'dead';
+      state='dead';
+      // persist HI
+      const saved = parseInt(localStorage.getItem('dino-hi')||'0',10) || 0;
+      if(hiScore>saved) localStorage.setItem('dino-hi', String(hiScore));
       break;
     }
   }
 }
 
-function startJump(){
-  if(state==='idle'){
-    state='running';
-  }
-  if(state==='running' && dino.onGround){
-    dino.vy = -6; // lower jump height base
-    dino.onGround = false;
-    jumpTime = 0;
-  }
-}
-
+// ------------- Draw -------------
 function draw(){
   ctx.clearRect(0,0,W,H);
+
+  // clouds
   for(const c of clouds) ctx.drawImage(CLOUD, Math.round(c.x), Math.round(c.y));
 
-  ctx.strokeStyle = COL.ground;
-  ctx.beginPath();
-  ctx.moveTo(0, groundY()+0.5);
-  ctx.lineTo(W, groundY()+0.5);
-  ctx.stroke();
+  // ground line
+  ctx.strokeStyle=COL.ground; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0, GY+0.5); ctx.lineTo(W, GY+0.5); ctx.stroke();
+  groundDots();
 
-  for(let x = Math.floor(groundX)%40; x < W; x+=40){
-    ctx.fillStyle = COL.ground;
-    ctx.fillRect(x+8, groundY()+3, 2,1);
-  }
-
+  // obstacles
   for(const o of obstacles) ctx.drawImage(o.img, Math.round(o.x), Math.round(o.y));
 
+  // dino
   let frame = (state==='running' && dino.onGround) ? Math.floor(dino.anim)%2 : 2;
   ctx.drawImage(DINO.frames[frame], Math.round(dino.x - DINO.ox), Math.round(dino.y - DINO.oy));
 
-  drawScore();
-  if(state==='idle'){
-    drawCenterText('Press Space/↑/Click to Start');
-  } else if(state==='dead'){
-    drawCenterText('GAME OVER - Press Space/↑/Click');
-  }
-}
-
-function drawScore(){
+  // score (right-aligned, zero-padded)
+  ctx.fillStyle='#666'; ctx.font='10px monospace'; ctx.textBaseline='top';
   const s = String(score).padStart(5,'0');
   const hs = String(hiScore).padStart(5,'0');
-  ctx.fillStyle = '#666';
-  ctx.font = '10px monospace';
-  ctx.fillText('HI ' + hs + '  ' + s, W-110, 6);
+  const txt = 'HI '+hs+'  '+s;
+  const w = ctx.measureText(txt).width;
+  ctx.fillText(txt, W - w - 6, 6);
+
+  if(state==='idle') centerText('Tap/Click/Space/↑ to Start');
+  if(state==='dead') centerText('GAME OVER — Tap/Click/Space/↑');
+}
+function centerText(msg){
+  ctx.fillStyle='#444'; ctx.font='12px monospace';
+  const m=ctx.measureText(msg);
+  ctx.fillText(msg, Math.round((W-m.width)/2), 70);
 }
 
-function drawCenterText(msg){
-  ctx.fillStyle = '#444';
-  ctx.font = '12px monospace';
-  const m = ctx.measureText(msg);
-  ctx.fillText(msg, Math.round((W - m.width)/2), 70);
+// ------------- Input -------------
+function startJump(){
+  if(state==='idle'){ state='running'; }
+  if(state==='running' && dino.onGround){
+    dino.vy = -6.0;      // base lower jump
+    dino.onGround = false;
+    jumpFrames = 0;      // allow hold extension up to ~12 frames
+  }
 }
 
 function preventScrollKeys(e){
-  if (['Space','ArrowUp','ArrowDown'].includes(e.code)){
-    e.preventDefault();
-  }
+  if(['Space','ArrowUp','ArrowDown'].includes(e.code)) e.preventDefault();
 }
 document.addEventListener('keydown', preventScrollKeys, {passive:false});
 
-document.addEventListener('keydown', e=>{
+document.addEventListener('keydown', (e)=>{
   if(['Space','ArrowUp'].includes(e.code)){
-    if(state==='dead'){ reset(); state='running'; }
-    jumpHold = true;
-    startJump();
+    if(state==='dead'){ reset(); state='running'; return; }
+    jumpHold = true; startJump();
   }
 });
-document.addEventListener('keyup', e=>{
-  if(['Space','ArrowUp'].includes(e.code)){
-    jumpHold = false;
-  }
+document.addEventListener('keyup', (e)=>{
+  if(['Space','ArrowUp'].includes(e.code)) jumpHold=false;
 });
 
 canvas.addEventListener('click', ()=>{
-  if(state==='dead'){ reset(); state='running'; }
-  else { startJump(); jumpHold = true; setTimeout(()=>jumpHold=false, 100); }
+  if(state==='dead'){ reset(); state='running'; return; }
+  startJump(); jumpHold=true; setTimeout(()=>jumpHold=false, 110);
 });
-
-canvas.addEventListener('touchstart', e=>{
+canvas.addEventListener('touchstart', (e)=>{
   e.preventDefault();
-  if(state==='dead'){ reset(); state='running'; }
-  else { startJump(); jumpHold = true; }
-}, {passive:false});
-canvas.addEventListener('touchend', e=>{ jumpHold = false; });
+  if(state==='dead'){ reset(); state='running'; return; }
+  startJump(); jumpHold=true;
+},{passive:false});
+canvas.addEventListener('touchend', ()=>{ jumpHold=false; });
 
-let last = performance.now();
+// ------------- Main loop -------------
 function tick(now){
-  const dt = now - last; last = now;
-  t += dt;
+  const dt = now - lastTime; lastTime = now;
   update(dt);
   draw();
   requestAnimationFrame(tick);
