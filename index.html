@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Mini Dino (Adjusted)</title>
+<title>Mini Dino (Easy Mode)</title>
 <style>
   html,body { margin:0; padding:0; background:#fff; }
   canvas { display:block; margin:auto; background:#fff; image-rendering: pixelated; cursor:pointer; }
@@ -107,9 +107,10 @@ function groundY(){ return 130; }
 function spawnObstacle(){
   const img = CACT[0];
   let x = W + rnd(0, 80);
-  const minGap = clamp(110 - speed*5, 60, 110);
+  // Easier gap settings
+  const minGap = clamp(140 - speed*4, 100, 160);
   if(obstacles.length){
-    x = Math.max(x, obstacles[obstacles.length-1].x + minGap + rnd(0, 40));
+    x = Math.max(x, obstacles[obstacles.length-1].x + minGap + rnd(40, 80));
   }
   obstacles.push({ img, w: img.width, h: img.height, x, y: groundY() - img.height });
 }
@@ -131,7 +132,7 @@ function update(dt){
 
   for(const o of obstacles){ o.x -= speed; }
   obstacles = obstacles.filter(o => o.x + o.w > -4);
-  if(obstacles.length===0 || (W - (obstacles[obstacles.length-1]?.x||0)) > 120+rnd(0,50)){
+  if(obstacles.length===0 || (W - (obstacles[obstacles.length-1]?.x||0)) > 140+rnd(40,80)){
     spawnObstacle();
   }
 
